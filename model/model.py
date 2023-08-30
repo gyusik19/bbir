@@ -1,22 +1,37 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision.models import resnet50
 from base import BaseModel
 
+class ResNet50(nn.Module):
+    def __init__(self, pretrained=True):
+        super(ResNet50, self).__init__()
+        self.resnet50 = resnet50(pretrained=pretrained)
+        self.resnet50 = nn.Sequential(*(list(self.resnet50.children())[:-2]))
+    def forward(self, x):
+        x = self.resnet50(x)
+        return x
 
-class MnistModel(BaseModel):
-    def __init__(self, num_classes=10):
-        super().__init__()
-        self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
-        self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
-        self.conv2_drop = nn.Dropout2d()
-        self.fc1 = nn.Linear(320, 50)
-        self.fc2 = nn.Linear(50, num_classes)
+class FeatureSynthesisModel(nn.Module):
+    def __init__(self):
+        super(FeatureSynthesisModel, self).__init__()
+        
+        self.features = nn.Sequential(
+            nn.Conv2d(80, 512, 3, padding=1),
+            nn.BatchNorm2d(512),
+            nn.ReLU(),
+            nn.MaxPool2d(3, 2),
+            
+            nn.Conv2d(512, 1024, 3, padding=1),
+            nn.BatchNorm2d(1024),
+            nn.ReLU(),
+            nn.MaxPool2d(3, 2),
+            
+            nn.Conv2d(1024, 2048, 3, padding=1),
+            nn.BatchNorm2d(2048),
+            nn.ReLU()
+        )
 
     def forward(self, x):
-        x = F.relu(F.max_pool2d(self.conv1(x), 2))
-        x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
-        x = x.view(-1, 320)
-        x = F.relu(self.fc1(x))
-        x = F.dropout(x, training=self.training)
-        x = self.fc2(x)
-        return F.log_softmax(x, dim=1)
+        return self.features(x)

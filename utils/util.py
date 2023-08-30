@@ -1,10 +1,39 @@
 import json
 import torch
 import pandas as pd
+import math
+
 from pathlib import Path
 from itertools import repeat
 from collections import OrderedDict
 
+def create_bbox_mask(bbox_ratio, feature_size=7):
+    """
+    Create a binary mask based on bounding box ratio.
+    
+    Args:
+    - bbox_ratio (tuple): (x, y, w, h) in ratio format.
+    - feature_size (int): Size of the feature map (default is 7 for a 7x7 feature map).
+    
+    Returns:
+    - mask (tensor): Binary mask of shape [feature_size, feature_size].
+    """
+    x, y, w, h = bbox_ratio
+    # Convert ratio to actual coordinates
+    x = x * feature_size
+    y = y * feature_size
+    w = w * feature_size
+    h = h * feature_size
+
+    min_x, min_y, max_x, max_y = int(x - w / 2), int(y - h / 2), math.ceil(x + w / 2), math.ceil(y + h / 2)
+    min_x = max(min_x, 0)
+    min_y = max(min_y, 0)
+    max_x = min(max_x, feature_size)
+    max_y = min(max_y, feature_size)
+    
+    mask = torch.zeros((feature_size, feature_size))
+    mask[min_y:max_y, min_x:max_x] = 1
+    return mask
 
 def ensure_dir(dirname):
     dirname = Path(dirname)

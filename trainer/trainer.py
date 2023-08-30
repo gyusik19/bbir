@@ -1,20 +1,22 @@
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torchvision.utils import make_grid
 from base import BaseTrainer
-from utils import inf_loop, MetricTracker
+from utils import inf_loop, MetricTracker, create_bbox_mask
 
 
 class Trainer(BaseTrainer):
     """
     Trainer class
     """
-    def __init__(self, model, criterion, metric_ftns, optimizer, config, device,
+    def __init__(self, model, backbone_model, criterion, metric_ftns, optimizer, config, device,
                  data_loader, valid_data_loader=None, lr_scheduler=None, len_epoch=None):
         super().__init__(model, criterion, metric_ftns, optimizer, config)
         self.config = config
         self.device = device
         self.data_loader = data_loader
+        self.backbone_model = backbone_model
         if len_epoch is None:
             # epoch-based training
             self.len_epoch = len(self.data_loader)
@@ -39,26 +41,38 @@ class Trainer(BaseTrainer):
         """
         self.model.train()
         self.train_metrics.reset()
-        for batch_idx, (data, target) in enumerate(self.data_loader):
-            data, target = data.to(self.device), target.to(self.device)
-
+        for batch_idx, (imgs, canvas_queries, queries) in enumerate(self.data_loader):
+            imgs = imgs.to(self.device)
+            batch_size = imgs.shape[0]
             self.optimizer.zero_grad()
-            output = self.model(data)
-            loss = self.criterion(output, target)
+            target_feature = self.backbone_model(imgs)
+            canvas_queries = canvas_queries.to(self.device)
+            output_feature = self.model(canvas_queries)
+
+            # Create a mask tensor for the entire batch
+            masks = torch.stack([create_bbox_mask(queries[1][i], 7) for i in range(batch_size)]).to(self.device)
+            masks = masks.unsqueeze(1)  # Add channel dimension: [batch_size, 1, 7, 7]
+
+            # Multiply the feature tensors with the batched mask tensor
+            output_feature = output_feature * masks
+            target_feature = target_feature * masks
+            
+
+            loss = self.criterion(output_feature, target_feature)
             loss.backward()
             self.optimizer.step()
 
             self.writer.set_step((epoch - 1) * self.len_epoch + batch_idx)
             self.train_metrics.update('loss', loss.item())
-            for met in self.metric_ftns:
-                self.train_metrics.update(met.__name__, met(output, target))
+            # for met in self.metric_ftns:
+            #     self.train_metrics.update(met.__name__, met(output_feature, target_feature))
 
             if batch_idx % self.log_step == 0:
                 self.logger.debug('Train Epoch: {} {} Loss: {:.6f}'.format(
                     epoch,
                     self._progress(batch_idx),
                     loss.item()))
-                self.writer.add_image('input', make_grid(data.cpu(), nrow=8, normalize=True))
+                self.writer.add_image('input', make_grid(imgs.cpu(), nrow=8, normalize=True))
 
             if batch_idx == self.len_epoch:
                 break
