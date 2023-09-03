@@ -14,11 +14,11 @@ class ResNet50(nn.Module):
         return x
 
 class FeatureSynthesisModel(nn.Module):
-    def __init__(self):
+    def __init__(self, embed_dim=300):
         super(FeatureSynthesisModel, self).__init__()
         
         self.features = nn.Sequential(
-            nn.Conv2d(80, 512, 3, padding=1),
+            nn.Conv2d(embed_dim, 512, 3, padding=1),
             nn.BatchNorm2d(512),
             nn.ReLU(),
             nn.MaxPool2d(3, 2),

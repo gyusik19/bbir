@@ -1,10 +1,13 @@
 {
-    "name": "masking_l2norm",
+    "name": "word2vec",
     "n_gpu": 1,
 
     "arch": {
         "type": "MnistModel",
-        "args": {}
+        "args": {
+            "embed_mode": "word2vec",
+            "embed_dim": 300
+        }
     },
     "data_loader": {
         "type": "MnistDataLoader",

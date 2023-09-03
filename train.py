@@ -33,11 +33,17 @@ def main(config):
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     batch_size = config['data_loader']['args']['batch_size']
-    train_set = CocoDataset(root='./data/coco', mode='train', transform=transform)
+    train_set = CocoDataset(root='./data/coco', mode='train')
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,shuffle=True, num_workers=4, collate_fn=collate_fn)
+    train_features = torch.load('./data/coco/train/features/resnet50_features.pt')
 
+    valid_set = CocoDataset(root='./data/coco', mode='val2017')
+    valid_loader = torch.utils.data.DataLoader(valid_set, batch_size=batch_size,shuffle=False, num_workers=4, collate_fn=collate_fn)
+    valid_features = torch.load('./data/coco/val2017/features/resnet50_features.pt')
+
+    embed_dim = config['arch']['args']['embed_dim']
     # build model architecture, then print to console
-    model = FeatureSynthesisModel()
+    model = FeatureSynthesisModel(embed_dim=embed_dim)
     backbone_model = ResNet50()
     logger.info(model)
 
@@ -62,7 +68,9 @@ def main(config):
                       config=config,
                       device=device,
                       data_loader=train_loader,
-                      valid_data_loader=None,
+                      train_features=train_features,
+                      valid_data_loader=valid_loader,
+                      valid_features=valid_features,
                       lr_scheduler=lr_scheduler)
 
     trainer.train()

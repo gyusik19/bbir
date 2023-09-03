@@ -1,5 +1,7 @@
 import json
 import os
+import random
+import copy
 from pycocotools.coco import COCO
 
 ROOT_PATH = '../data/coco'
@@ -66,16 +68,32 @@ def generate_queries_from_coco(ann_file, mode='train'):
             continue
         tmp = sorted(tmp, key=lambda x: x['area'], reverse=True)
         tmp = tmp[:6] if len(tmp) > 6 else tmp
-        for obj in tmp:
-            cnt+=1
-            img_query = dict()
-            img_query['layout'] = obj
-            img_query['img_id'] = img_id
-            img_query['W'], img_query['H'] = W, H
-            queries.append(img_query)
+
+        img_query = dict()
+        img_query['layout'] = []
+        img_query['img_id'] = img_id
+        img_query['W'], img_query['H'] = W, H
+        if mode != 'train':
+            history = []
+            for i in range(len(tmp)):
+                num_elements = random.randint(1, len(tmp))
+                sampled = random.sample(tmp, num_elements)
+                sampled = sorted(sampled, key=lambda x: x['area'], reverse=True)
+                if sampled not in history:
+                    cnt+=1
+                    history.append(sampled)
+                    img_query['layout'] = sampled
+                    queries.append(copy.deepcopy(img_query))
+        
+        if mode == 'train':
+            img_query['layout'] = []
+            for obj in tmp:
+                cnt+=1
+                img_query['layout'] = [obj]
+                queries.append(copy.deepcopy(img_query))
 
     print(f'generate {cnt} queries')
     with open(query_file_path, 'w') as f:
         json.dump(queries, f, indent=4)
 
-generate_queries_from_coco('../data/coco/annotations/instances_val2017.json', mode='val2017')
+generate_queries_from_coco(f'{ROOT_PATH}/annotations/instances_train2017.json', mode='train')

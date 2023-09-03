@@ -4,3 +4,7 @@ numpy
 tqdm
 tensorboard>=1.14
 pycocotools
+fasttext
+scikit-learn
+pillow
+opencv-python
