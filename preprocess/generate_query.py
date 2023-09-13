@@ -38,6 +38,8 @@ def generate_queries_from_coco(ann_file, mode='train'):
     coco_ann = COCO(ann_file)
     query_file_path = os.path.join(ROOT_PATH, mode, 'query.json')
     target_imgs = os.listdir(os.path.join(ROOT_PATH, mode, 'images'))
+    # sample random 5000 images from target images
+    target_imgs = random.sample(target_imgs, 5000)
     cnt = 0
     for img in target_imgs:
         img_id = int(img.split('.')[0])
@@ -96,4 +98,4 @@ def generate_queries_from_coco(ann_file, mode='train'):
     with open(query_file_path, 'w') as f:
         json.dump(queries, f, indent=4)
 
-generate_queries_from_coco(f'{ROOT_PATH}/annotations/instances_train2017.json', mode='train')
+generate_queries_from_coco(f'{ROOT_PATH}/annotations/instances_train2017.json', mode='gallery')

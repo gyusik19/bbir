@@ -35,3 +35,14 @@ class FeatureSynthesisModel(nn.Module):
 
     def forward(self, x):
         return self.features(x)
+    
+class Classifier(nn.Module):
+    def __init__(self, input_dim):
+        super(Classifier, self).__init__()
+        self.fc = nn.Linear(input_dim, 4096)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        x = self.fc(x)
+        x = self.relu(x)
+        return x

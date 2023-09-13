@@ -8,3 +8,4 @@ fasttext
 scikit-learn
 pillow
 opencv-python
+faiss-gpu
