@@ -46,7 +46,6 @@ def is_relevant(query_layouts, ranked_img_id, coco):
             max_iou = max(max_iou, miou)
         rel_score += max_iou
     rel_score /= num_bounding_boxes
-    print(rel_score)
     return rel_score > 0.3
 
             

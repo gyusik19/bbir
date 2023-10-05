@@ -49,5 +49,6 @@
         "early_stop": 10,
 
         "tensorboard": true
-    }
+    },
+    "masking": true
 }

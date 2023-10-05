@@ -4,18 +4,21 @@ import numpy as np
 import fasttext, fasttext.util
 
 from sklearn.neighbors import NearestNeighbors
+import faiss
 from tqdm import tqdm
 
 from data_loader.data_loaders import CocoDataset, collate_fn
 from model.model import *
 from parse_config import ConfigParser
 from utils import prepare_device, convert_query_to_tensor, create_bbox_mask, one_hot_embedding, create_bbox_mask 
+from utils import BatchKNearestNeighbor
 from utils import is_relevant, AP_at_k
 
 import model.loss as module_loss
 import model.metric as module_metric
 import model.model as module_arch
 import data_loader.data_loaders as module_data
+import time
 from pycocotools.coco import COCO
 
 
@@ -24,16 +27,16 @@ def main(config):
     logger = config.get_logger('test')
 
     batch_size = config['data_loader']['args']['batch_size']
-    batch_size = 4096
+    batch_size = 4
 
-    eval_set = CocoDataset(root='./data/coco', mode='val2017')
+    eval_set = CocoDataset(root='./data/coco', mode='gallery')
     data_loader = torch.utils.data.DataLoader(eval_set, batch_size=batch_size,shuffle=False, num_workers=4, collate_fn=collate_fn)
-    eval_features = torch.load('./data/coco/val2017/features/resnet50_features.pt')
+    eval_features = torch.load('./data/coco/gallery/features/resnet50_features.pt')
     
     # to numpy
     img_id_list = np.array(list(eval_features.keys()))
     feature_list = list(eval_features.values())
-    feature_list = torch.stack(feature_list).view(len(feature_list), -1).numpy()
+    feature_list = torch.stack(feature_list)
 
     embed_dim = config['arch']['args']['embed_dim']
     embed_mode = config['arch']['args']['embed_mode']
@@ -72,25 +75,34 @@ def main(config):
     all_APs_10 = []
     all_APs_50 = []
 
-    nbrs = NearestNeighbors(n_neighbors=50, algorithm='brute', metric='cosine').fit(feature_list)
-    coco = COCO('./data/coco/annotations/instances_val2017.json')
+    coco = COCO('./data/coco/annotations/instances_train2017.json')
+    nbrs = BatchKNearestNeighbor(batch_size=5000, device=device, mask=True)
+    nbrs.fit(feature_list.view(feature_list.shape[0], -1).cpu().numpy())
     with torch.no_grad():
         for i, (img_ids, layouts, sizes) in enumerate(tqdm(data_loader)):
-            all_output_features = []
             batch_size = len(img_ids)
+            all_indices = []
+            all_output_features = []
             for j in range(batch_size):
                 canvas_queries = convert_query_to_tensor(layouts[j], embed_dim, mode=embed_mode, embedding_fn=embed_fn) # [num_obj, num_dim, width, height]
                 canvas_queries = canvas_queries.to(device)
                 output_feature = model(canvas_queries) # [num_obj, 2048, 7, 7]
                 masks = torch.stack([create_bbox_mask(layouts[j][k]['bbox'], 7) for k in range(len(layouts[j]))]).unsqueeze(1).to(device)
+                # normalize
+                output_feature = output_feature / torch.norm(output_feature, dim=1, keepdim=True)
                 output_feature = output_feature * masks
                 # max pooling
                 output_feature, _ = torch.max(output_feature, dim=0)
-                output_feature = output_feature.view(1, -1).cpu().numpy()
-                all_output_features.append(output_feature)
-                # distances, indices = nbrs.kneighbors(output_feature)
+                output_feature = output_feature.view(1, -1)
+                all_output_features.append(output_feature.cpu().numpy())
             all_output_features = np.concatenate(all_output_features, axis=0)
-            distances, indices = nbrs.kneighbors(all_output_features)
+
+            start_time = time.time()
+            indices, distance = nbrs.predict(all_output_features, k=50)
+            print(f'knn time for {i*batch_size + j}: {time.time() - start_time}')
+
+            # all_output_features = np.concatenate(all_output_features, axis=0)
+            
             for j in range(batch_size):    
                 ranked_list = img_id_list[indices[j]]
                 AP_1 = AP_at_k(ranked_list, layouts[j], 1, coco)
