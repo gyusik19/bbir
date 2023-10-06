@@ -76,7 +76,7 @@ def main(config):
     all_APs_50 = []
 
     coco = COCO('./data/coco/annotations/instances_train2017.json')
-    nbrs = BatchKNearestNeighbor(batch_size=5000, device=device, mask=True)
+    nbrs = BatchKNearestNeighbor(batch_size=5000, device=device, mask=False)
     nbrs.fit(feature_list.view(feature_list.shape[0], -1).cpu().numpy())
     with torch.no_grad():
         for i, (img_ids, layouts, sizes) in enumerate(tqdm(data_loader)):
