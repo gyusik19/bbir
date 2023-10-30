@@ -1,6 +1,8 @@
 import torch
+import numpy as np
 import math
 import fasttext, fasttext.util
+import clip
 import copy
 
 def embedding_fn(mode='one-hot'):
@@ -13,6 +15,21 @@ def embedding_fn(mode='one-hot'):
         func = word2vec.get_word_vector
     else:
         raise ValueError('Invalid embedding mode')
+    return func
+
+def clip_embedding_fn(device='cuda'):
+    model, preprocess = clip.load("RN50")
+    def func(text):
+        text = clip.tokenize(text)
+        text = text.to(device)
+        text_features = model.encode_text(text)
+        return text_features
+    return func
+
+def coco_clip_embedding_fn():
+    class_embeddings = np.load('./data/coco/coco_embeddings_rn50.npy', allow_pickle=True).item()
+    def func(text):
+        return class_embeddings[text]
     return func
 
 def one_hot_embedding(label, num_classes):
@@ -39,8 +56,12 @@ def convert_query_to_tensor(queries, num_dim, mode='one-hot', embedding_fn=None)
         query_tensor = torch.zeros((width, height, num_dim), dtype=torch.float32)
         if mode == 'one-hot':
             cat_embedding = embedding_fn(obj['label'], num_dim)
-        else:
+        elif mode == 'word2vec':
             cat_embedding = torch.tensor(embedding_fn(obj['category']))
+        elif mode == 'clip':
+            cat_embedding = torch.tensor(embedding_fn(obj['category']))[0]
+        elif mode == 'coco_clip':
+            cat_embedding = torch.tensor(embedding_fn(obj['category']))[0]
         x, y, w, h = obj['bbox']
         x = x * width
         y = y * height

@@ -12,7 +12,7 @@ from model.model import *
 from parse_config import ConfigParser
 from utils import prepare_device, convert_query_to_tensor, create_bbox_mask, one_hot_embedding, create_bbox_mask 
 from utils import BatchKNearestNeighbor
-from utils import is_relevant, AP_at_k
+from utils import is_relevant, AP_at_k, ndcg_at_k, compute_rel_score, coco_clip_embedding_fn, clip_embedding_fn
 
 import model.loss as module_loss
 import model.metric as module_metric
@@ -40,12 +40,6 @@ def main(config):
 
     embed_dim = config['arch']['args']['embed_dim']
     embed_mode = config['arch']['args']['embed_mode']
-    if embed_mode == 'one-hot':
-        embed_fn = one_hot_embedding
-    else:
-        fasttext.util.download_model('en', if_exists='ignore')
-        word2vec = fasttext.load_model('cc.en.300.bin')
-        embed_fn = word2vec.get_word_vector
     
     # build model architecture, then print to console
     model = FeatureSynthesisModel(embed_dim=embed_dim)
@@ -57,6 +51,7 @@ def main(config):
     metric_fns = [getattr(module_metric, met) for met in config['metrics']]
 
     logger.info('Loading checkpoint: {} ...'.format(config.resume))
+    logger.info(f'masking : {config["masking"]}, normalize : {config["normalize"]}')
     checkpoint = torch.load(config.resume)
     state_dict = checkpoint['state_dict']
     if config['n_gpu'] > 1:
@@ -68,6 +63,20 @@ def main(config):
     model = model.to(device)
     model.eval()
 
+    if embed_mode == 'one-hot':
+        embed_fn = one_hot_embedding
+    elif embed_mode == 'word2vec':
+        fasttext.util.download_model('en', if_exists='ignore')
+        word2vec = fasttext.load_model('cc.en.300.bin')
+        embed_fn = word2vec.get_word_vector
+    elif embed_mode == 'clip':
+        embed_fn = clip_embedding_fn(device=device)
+    elif embed_mode == 'coco_clip':
+        embed_fn = coco_clip_embedding_fn()
+    else:
+        raise ValueError('Invalid embedding mode')
+
+    # testing 
     total_loss = 0.0
     total_metrics = torch.zeros(len(metric_fns))
 
@@ -75,8 +84,12 @@ def main(config):
     all_APs_10 = []
     all_APs_50 = []
 
+    ndcg_1s = []
+    ndcg_10s = []
+    ndcg_50s = []
+
     coco = COCO('./data/coco/annotations/instances_train2017.json')
-    nbrs = BatchKNearestNeighbor(batch_size=5000, device=device, mask=False)
+    nbrs = BatchKNearestNeighbor(batch_size=5000, device=device, mask=config["masking"])
     nbrs.fit(feature_list.view(feature_list.shape[0], -1).cpu().numpy())
     with torch.no_grad():
         for i, (img_ids, layouts, sizes) in enumerate(tqdm(data_loader)):
@@ -89,7 +102,8 @@ def main(config):
                 output_feature = model(canvas_queries) # [num_obj, 2048, 7, 7]
                 masks = torch.stack([create_bbox_mask(layouts[j][k]['bbox'], 7) for k in range(len(layouts[j]))]).unsqueeze(1).to(device)
                 # normalize
-                output_feature = output_feature / torch.norm(output_feature, dim=1, keepdim=True)
+                if config['normalize']:
+                    output_feature = output_feature / (torch.norm(output_feature, dim=1, keepdim=True) + 1e-10)
                 output_feature = output_feature * masks
                 # max pooling
                 output_feature, _ = torch.max(output_feature, dim=0)
@@ -105,19 +119,33 @@ def main(config):
             
             for j in range(batch_size):    
                 ranked_list = img_id_list[indices[j]]
+                relevance_scores = [compute_rel_score(layouts[j], ranked_list[k], coco) for k in range(len(ranked_list))]
+
                 AP_1 = AP_at_k(ranked_list, layouts[j], 1, coco)
                 AP_10 = AP_at_k(ranked_list, layouts[j], 10, coco)
                 AP_50 = AP_at_k(ranked_list, layouts[j], 50, coco)
-                
-                print(f'img: {img_ids[j]}, num obj: {len(layouts[j])}, AP@1: {AP_1}, AP@10: {AP_10}, AP@50: {AP_50}')
-                
                 all_APs_1.append(AP_1)
                 all_APs_10.append(AP_10)
                 all_APs_50.append(AP_50)
+            
+                ndcg_1 = ndcg_at_k(relevance_scores, 1)
+                ndcg_10 = ndcg_at_k(relevance_scores, 10)
+                ndcg_50 = ndcg_at_k(relevance_scores, 50)
+                ndcg_1s.append(ndcg_1)
+                ndcg_10s.append(ndcg_10)
+                ndcg_50s.append(ndcg_50)
+
+                print(f'img: {img_ids[j]}, num obj: {len(layouts[j])}, AP@1: {AP_1}, AP@10: {AP_10}, ndcg@1: {ndcg_1}, ndcg@10: {ndcg_10}')
+                
+                
 
     mAP_1 = sum(all_APs_1) / len(all_APs_1)
     mAP_10 = sum(all_APs_10) / len(all_APs_10)
     mAP_50 = sum(all_APs_50) / len(all_APs_50)
+
+    ndcg_1 = sum(ndcg_1s) / len(ndcg_1s)
+    ndcg_10 = sum(ndcg_10s) / len(ndcg_10s)
+    ndcg_50 = sum(ndcg_50s) / len(ndcg_50s)
 
             # computing loss, metrics on test set
             # loss = loss_fn(output, target)
@@ -127,11 +155,15 @@ def main(config):
             #     total_metrics[i] += metric(output, target) * batch_size
 
     n_samples = len(data_loader.sampler)
+    
     log = {'loss': total_loss / n_samples}
     log.update({
         'mAP@1': mAP_1,
         'mAP@10': mAP_10,
-        'mAP@50': mAP_50
+        'mAP@50': mAP_50,
+        'ndcg@1': ndcg_1,
+        'ndcg@10': ndcg_10,
+        'ndcg@50': ndcg_50
     })
     logger.info(log)
 
@@ -140,8 +172,9 @@ if __name__ == '__main__':
     args = argparse.ArgumentParser(description='PyTorch Template')
     args.add_argument('-c', '--config', default=None, type=str,
                       help='config file path (default: None)')
-    args.add_argument('-r', '--resume', default='./saved/models/word2vec/0831_154110/checkpoint-epoch50.pth', type=str,
-                      help='path to latest checkpoint (default: None)')
+    # args.add_argument('-r', '--resume', default='./saved/models/word2vec/0831_154110/checkpoint-epoch28.pth', type=str,
+    #                   help='path to latest checkpoint (default: None)')
+    args.add_argument('-r', '--resume', default='./saved/models/clip_template/1016_200332/checkpoint-epoch50.pth', type=str)
     args.add_argument('-d', '--device', default=None, type=str,
                       help='indices of GPUs to enable (default: all)')
 

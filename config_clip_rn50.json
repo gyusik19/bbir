@@ -50,6 +50,6 @@
 
         "tensorboard": true
     },
-    "masking": false,
-    "normalize": false
+    "masking": true,
+    "normalize": true
 }

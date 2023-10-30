@@ -3,7 +3,21 @@ import math
 import json
 import sys
 import os
+import numpy as np
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+def dcg_at_k(r, k):
+    """Compute DCG@k for a list of relevance scores `r`."""
+    r = np.asfarray(r)[:k]
+    return r[0] + np.sum(r[1:] / np.log2(np.arange(2, r.size + 1)))
+
+def ndcg_at_k(r, k):
+    """Compute NDCG@k for a list of relevance scores `r`."""
+    dcg_max = dcg_at_k(sorted(r, reverse=True), k)
+    if not dcg_max:
+        return 0.0
+    return dcg_at_k(r, k) / dcg_max
 
 def AP_at_k(ranked_list, layouts, k, coco):
     # Limit the ranked list to top-K items
@@ -15,7 +29,7 @@ def AP_at_k(ranked_list, layouts, k, coco):
     AP = sum(precisions) / len(relevant_positions) if len(relevant_positions) > 0 else 0
     return AP
 
-def is_relevant(query_layouts, ranked_img_id, coco):
+def compute_rel_score(query_layouts, ranked_img_id, coco):
     img = coco.loadImgs([ranked_img_id])[0]
     ann = coco.loadAnns(coco.getAnnIds(imgIds=[ranked_img_id]))
     ranked_img_layouts = [ann[i] for i in range(len(ann))]
@@ -23,7 +37,6 @@ def is_relevant(query_layouts, ranked_img_id, coco):
     num_bounding_boxes = len(query_layouts)
     rel_score = 0
     for query_layout in query_layouts:
-        # calculate miou
         x1, y1, w1, h1 = query_layout['bbox']
         x1, y1, w1, h1 = x1 * W, y1 * H, w1 * W, h1 * H
         min_x1, min_y1, max_x1, max_y1 = int(x1 - w1 / 2), int(y1 - h1 / 2), math.ceil(x1 + w1 / 2), math.ceil(y1 + h1 / 2)
@@ -34,7 +47,7 @@ def is_relevant(query_layouts, ranked_img_id, coco):
                 continue
             x2, y2, w2, h2 = ranked_img_layout['bbox']
             min_x2, min_y2, max_x2, max_y2 = int(x2), int(y2), math.ceil(x2 + w2), math.ceil(y2 + h2)
-            
+
             # compute miou
             min_x = max(min_x1, min_x2)
             min_y = max(min_y1, min_y2)
@@ -44,8 +57,12 @@ def is_relevant(query_layouts, ranked_img_id, coco):
             union = w1 * h1 + w2 * h2 - intersection
             miou = intersection / union
             max_iou = max(max_iou, miou)
+        
         rel_score += max_iou
-    rel_score /= num_bounding_boxes
+    return rel_score / num_bounding_boxes
+
+def is_relevant(query_layouts, ranked_img_id, coco):
+    rel_score = compute_rel_score(query_layouts, ranked_img_id, coco)
     return rel_score > 0.3
 
             
