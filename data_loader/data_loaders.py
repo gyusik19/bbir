@@ -8,6 +8,7 @@ import math
 from torchvision import datasets, transforms
 from pycocotools.coco import COCO
 from PIL import Image
+from utils import create_bbox_mask
 
 word2vec = None
 
@@ -53,11 +54,45 @@ def convert_query_to_tensor(query, num_dim, mode='one-hot', embedding_fn=None):
     # rescaled_tensor = F.interpolate(query_tensor.permute(2, 0, 1).unsqueeze(0), size=(31, 31), mode='bilinear', align_corners=False).squeeze(0)
     return query_tensor
 
+class FeatureDataset(torch.utils.data.Dataset):
+    def __init__(self, root='../data/generated', masking=True):
+        self.root = root
+        self.dir = os.path.join(root, 'features')
+        self.masking = masking
+        self.feature_path = os.path.join(self.dir, 'resnet50_features.pt')
+        self.features = torch.load(self.feature_path)
+        self.img_ids = list(self.features.keys())
+        self.features = list(self.features.values())
+        self.query_path = os.path.join(root, 'query_for_diffusion.json')
+        with open(self.query_path, 'r') as f:
+            self.queries = json.load(f)
+    
+    def __len__(self):
+        return len(self.features)
+    
+    def __getitem__(self, index):
+        img_id = self.img_ids[index]
+        feature = self.features[index]
+        for query in self.queries:
+            if query['img_id'] == img_id:
+                layout = query['layout']
+                break
+        if self.masking:
+            masks = torch.stack([create_bbox_mask(layout[k]['bbox'], 7) for k in range(len(layout))]).unsqueeze(1)
+            feature = feature * masks
+            feature, _ = torch.max(feature, dim=0)
+        feature = feature.view(-1)
+
+        return img_id, feature, layout
+
+    
+
+
 class CocoDataset(torch.utils.data.Dataset):
     def __init__(self, root='../data/coco', mode='train'):
         self.root = root
         self.dir = os.path.join(root, mode)
-        self.queries_path = os.path.join(self.dir, 'query.json')
+        self.queries_path = os.path.join(self.dir, 'query_for_diffusion.json')
         with open(self.queries_path, 'r') as f:
             self.queries = json.load(f)
     
@@ -70,6 +105,12 @@ class CocoDataset(torch.utils.data.Dataset):
         layouts = self.queries[index]['layout']
         W, H = self.queries[index]['W'], self.queries[index]['H']
         return img_id, layouts, (W, H)
+
+def feature_collate_fn(batch):
+    img_ids = [item[0] for item in batch]
+    features = [item[1] for item in batch]
+    layouts = [item[2] for item in batch]
+    return img_ids, features, layouts
 
 def collate_fn(batch):
     img_ids = [item[0] for item in batch]

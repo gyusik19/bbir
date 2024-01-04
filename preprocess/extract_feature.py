@@ -12,8 +12,9 @@ from PIL import Image
 from model.model import ResNet50
 
 
-root_dir = "data/coco"
-dir_list = ['train', 'gallery', 'val2017']
+root_dir = "data/generated"
+# dir_list = ['train', 'gallery', 'val2017']
+dir_list = ['']
 # train_dir = os.path.join(root_dir, 'train')
 # gallery_dir = os.path.join(root_dir, 'gallery')
 # val_dir = os.path.join(root_dir, 'val2017')
@@ -37,12 +38,13 @@ transform = transforms.Compose([
 for dir_name in dir_list:
     data_dir = os.path.join(root_dir, dir_name)
     img_dir = os.path.join(data_dir, 'images')
-    img_paths = glob.glob(os.path.join(img_dir, '*.jpg'))
+    img_paths = glob.glob(os.path.join(img_dir, '*.png'))
+    print(len(img_paths))
     os.makedirs(os.path.join(data_dir, 'features'), exist_ok=True)
     features_dict = {}
     for img_path in img_paths:
         img = Image.open(img_path).convert('RGB')
-        img_id = int(os.path.basename(img_path).split('.')[0])
+        img_id = int(os.path.basename(img_path).split('_')[0])
         img_tensor = transform(img)
         img_tensor = img_tensor.unsqueeze(0)
         img_tensor = img_tensor.to(device)

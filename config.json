@@ -1,12 +1,12 @@
 {
-    "name": "clip_template_RN50",
+    "name": "w2v",
     "n_gpu": 1,
 
     "arch": {
         "type": "MnistModel",
         "args": {
-            "embed_mode": "coco_clip",
-            "embed_dim": 1024
+            "embed_mode": "word2vec",
+            "embed_dim": 300
         }
     },
     "data_loader": {
@@ -50,6 +50,6 @@
 
         "tensorboard": true
     },
-    "masking": false,
+    "masking": true,
     "normalize": false
 }
